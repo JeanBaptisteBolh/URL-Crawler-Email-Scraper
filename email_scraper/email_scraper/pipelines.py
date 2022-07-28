@@ -29,6 +29,7 @@ class EmailScraperPipeline:
         self.curr.execute("""
             CREATE TABLE EMAILS(
                 email text UNIQUE,
+                page_title_text text,
                 h1_text text,
                 urls text,
                 host_country text
@@ -46,39 +47,54 @@ class EmailScraperPipeline:
 
     def store_db(self, item):
         adapter = ItemAdapter(item)
-        email = adapter.get('email')
-        h1_text = adapter.get('h1_text')
         url = adapter.get('url')
-
         url_host_country = self.get_host_country_for_url(url)
 
-        # Check if email is in the db already
-        result = self.email_exists(email)
-        
-        # If record already exists, append if there is text to append.
-        if result:
-            if h1_text != "":
-                self.append_to_h1_text(email, h1_text)
-            if url != "":
-                self.append_to_urls(email, url, url_host_country)
+        # If host country is United States, add to the database
+        if url_host_country == "US":
+            email = adapter.get('email')
+            page_title = adapter.get('page_title')
+            h1_text = adapter.get('h1_text')
 
-        # Otherwise add new email and h1 text
-        else:
-            self.store_new_email(email, h1_text, url, url_host_country)
+            # Check if email is in the db already
+            result = self.email_exists(email)
+            
+            # If record already exists, append if there is text to append.
+            if result:
+                if h1_text != "":
+                    self.append_to_h1_text(email, h1_text)
+                if url != "":
+                    self.append_to_urls(email, url, url_host_country)
+                if page_title != "":
+                    self.append_to_page_title(email, page_title)
+
+            # Otherwise add new email and h1 text
+            else:
+                self.store_new_email(email, page_title, h1_text, url, url_host_country)
 
     def email_exists(self, email):
         self.curr.execute(
             'SELECT email FROM emails WHERE email=(?)', (email,))
         return self.curr.fetchone()
 
-    def store_new_email(self, email, h1_text, url, url_host_country):
-        self.curr.execute('INSERT INTO emails VALUES (?,?,?,?)',(
+    def store_new_email(self, email, page_title, h1_text, url, url_host_country):
+        self.curr.execute('INSERT INTO emails VALUES (?,?,?,?,?)',(
             email,
+            page_title,
             h1_text,
             url,
             url_host_country,
         ))
         self.conn.commit()
+
+    def append_to_page_title(self, email, page_title):
+        self.curr.execute("""
+            UPDATE emails 
+            SET page_title_text = page_title_text || (?)
+            WHERE email = (?)""",(
+            page_title,
+            email,
+        ))
 
     def append_to_h1_text(self, email, h1_text):
         self.curr.execute('UPDATE emails SET h1_text = h1_text || (?) WHERE email = (?)', (
@@ -89,7 +105,7 @@ class EmailScraperPipeline:
     def append_to_urls(self, email, url, url_host_country):
         self.curr.execute("""
             UPDATE emails 
-            SET urls = urls || (?), host_country = (?)
+            SET urls = urls || ' ' || (?), host_country = (?)
             WHERE email = (?)""",(
             url,
             url_host_country,
@@ -105,5 +121,5 @@ class EmailScraperPipeline:
             return country
 
         except Exception as e:
-            return None
+            return 'N/A'
 

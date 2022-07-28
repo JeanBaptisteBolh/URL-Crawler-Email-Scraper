@@ -30,12 +30,20 @@ class GatherEmailsSpider(scrapy.Spider):
         except UnicodeDecodeError:
             return
         
+        # Get all emails from the page using the regex
         body_emails = self.email_regex.findall(html)
 
-        # trying to exclude texts that look like emails but are not (e.g. image@home.png).
+        # Filter emails that look like emails but are not (e.g. image@home.png).
         emails = set([email for email in body_emails if
                 get_tld('https://' + email.split('@')[-1], fail_silently=True)])
-        
+
+        # Get title for the site
+        page_title = ""
+        try:
+            page_title = response.css('title::text').extract()[0].strip().replace('\n', ' ')
+        except Exception as e:
+            pass
+
         # Get all h1 text, concatenate it into one string
         h1_text_string = ""
         try:
@@ -43,20 +51,20 @@ class GatherEmailsSpider(scrapy.Spider):
             for h1_tag in h1_text_list:
                 # Get rid of whitespace/newlines and append
                 h1_text_string += h1_tag.strip().replace('\n', ' ') + " (end tag) "
-
         except Exception as e:
             pass
-        
+    
         # If emails were found, yield
         if len(emails) > 0:
             for email in emails:
                 # For some reason the email regex allows for /'s in emails.  Let's actually toss those...
                 if '/' not in email:
                     items['email'] = email
+                    items['page_title'] = page_title
                     items['h1_text'] = h1_text_string
                     items['url'] = response.request.url
                     
-                    yield items
+                    yield items # Sends to database
             
         # If greedy, get all the links from the page and scrape those
         if self.greedy:
