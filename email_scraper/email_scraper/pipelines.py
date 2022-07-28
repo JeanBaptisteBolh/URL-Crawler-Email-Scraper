@@ -10,6 +10,8 @@ import socket
 import geocoder
 from urllib import parse
 import sqlite3
+from scrapy.exceptions import CloseSpider
+
 
 # Extracted data -> Temporary Containers (items) -> Pipelines -> Database
 
@@ -37,7 +39,7 @@ class EmailScraperPipeline:
 
     # Items yielded in the parse method of our spider will arive here.
     def process_item(self, item, spider):
-        self.store_db(item)
+        self.store_db(item, spider)
 
         try:
             print("PIPELINE:", adapter.get('email'))
@@ -45,10 +47,10 @@ class EmailScraperPipeline:
             pass
         return item
 
-    def store_db(self, item):
+    def store_db(self, item, spider):
         adapter = ItemAdapter(item)
         url = adapter.get('url')
-        url_host_country = self.get_host_country_for_url(url)
+        url_host_country = self.get_host_country_for_url(url, spider)
 
         # If host country is United States, add to the database
         if url_host_country == "US":
@@ -112,13 +114,18 @@ class EmailScraperPipeline:
             email,
         ))
 
-    def get_host_country_for_url(self, url):
+    def get_host_country_for_url(self, url, spider):
         try:
             split_url = parse.urlsplit(url)
             netloc = split_url.netloc
             ip = geocoder.ip(socket.gethostbyname(netloc))
-            country = ip.country
-            return country
+            status_code = ip.status_code
+            # 429 means we've hit our IP search limit.  Kill the scraper
+            if status_code == 429:
+                spider.crawler.engine.close_spider(self, reason="IP location API limit hit!  Change location or use a VPN to get more data.")
+            else:
+                country = ip.country
+                return country
 
         except Exception as e:
             return 'N/A'
